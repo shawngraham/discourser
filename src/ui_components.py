@@ -6,6 +6,8 @@ import re
 import pandas as pd
 from typing import Dict, List, Tuple, Optional, Union
 import numpy as np
+import json
+import io
 
 class UIComponents:
     """Handles all UI components and rendering"""
@@ -56,8 +58,8 @@ class UIComponents:
         
         with col1:
             st.markdown("""
-            Welcome to the Academic Corpus Analysis Tool! This application helps you analyze 
-            the influence of academic texts across different document corpora.
+            Welcome to Discourser! This application helps you analyze 
+            the influence of a core body of work across other corpora.
             
             **Getting Started:**
             1. Create a new project or load an existing one
@@ -2433,61 +2435,114 @@ Third paragraph and so on.
         
         export_format = st.radio("Export format:", ["JSON", "CSV (where applicable)", "Excel"])
         
-        if st.button("Generate Export Package"):
+        # Generate and store export data in session state
+        if st.button("Prepare Export Files"):
             with st.spinner("Preparing export data..."):
                 export_data = self._prepare_export_data(coordinator, export_options)
+                
+                if export_data:
+                    # Store in session state to persist across reruns
+                    st.session_state.prepared_export_data = export_data
+                    st.session_state.export_format = export_format
+                    st.session_state.export_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    st.success("Export files prepared! Download buttons will appear below.")
+                else:
+                    st.error("Failed to prepare export data")
+        
+        # Display download buttons if export data exists
+        if hasattr(st.session_state, 'prepared_export_data') and st.session_state.prepared_export_data:
+            export_data = st.session_state.prepared_export_data
+            export_format = st.session_state.export_format
+            timestamp = st.session_state.export_timestamp
             
-            if export_data:
-                # Create download buttons for each export type
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            st.markdown("### Download Files")
+            
+            if export_format == "JSON":
+                # Single JSON file with all data
+                json_data = json.dumps(export_data, indent=2, default=str)
+                st.download_button(
+                    label="📄 Download Complete Analysis (JSON)",
+                    data=json_data,
+                    file_name=f"corpus_analysis_{timestamp}.json",
+                    mime="application/json",
+                    key="json_download"
+                )
+            
+            elif export_format == "CSV (where applicable)":
+                # Individual CSV files for tabular data
+                st.markdown("**Individual CSV Downloads:**")
                 
-                if export_format == "JSON":
-                    # Single JSON file with all data
-                    json_data = json.dumps(export_data, indent=2, default=str)
-                    st.download_button(
-                        label="Download Complete Analysis (JSON)",
-                        data=json_data,
-                        file_name=f"corpus_analysis_{timestamp}.json",
-                        mime="application/json"
-                    )
+                # Create columns for organized layout
+                col1, col2 = st.columns(2)
                 
-                elif export_format == "CSV (where applicable)":
-                    # Individual CSV files for tabular data
-                    for data_type, data in export_data.items():
-                        if isinstance(data, list) and data:
-                            # Convert to DataFrame if possible
-                            try:
-                                df = pd.DataFrame(data)
-                                csv_data = df.to_csv(index=False)
+                button_count = 0
+                for data_type, data in export_data.items():
+                    if isinstance(data, list) and data:
+                        # Convert to DataFrame if possible
+                        try:
+                            df = pd.DataFrame(data)
+                            csv_data = df.to_csv(index=False)
+                            
+                            # Alternate between columns
+                            with col1 if button_count % 2 == 0 else col2:
                                 st.download_button(
-                                    label=f"Download {data_type} (CSV)",
+                                    label=f"📊 {data_type.replace('_', ' ').title()}",
                                     data=csv_data,
                                     file_name=f"{data_type.lower().replace(' ', '_')}_{timestamp}.csv",
-                                    mime="text/csv"
+                                    mime="text/csv",
+                                    key=f"csv_{data_type}_{timestamp}"
                                 )
-                            except:
-                                st.warning(f"Cannot convert {data_type} to CSV format")
-                
-                elif export_format == "Excel":
-                    # Single Excel file with multiple sheets
+                            button_count += 1
+                        except Exception as e:
+                            st.warning(f"Cannot convert {data_type} to CSV format: {str(e)}")
+            
+            elif export_format == "Excel":
+                # Single Excel file with multiple sheets
+                try:
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        sheets_created = 0
                         for data_type, data in export_data.items():
                             try:
                                 if isinstance(data, list) and data:
                                     df = pd.DataFrame(data)
-                                    sheet_name = data_type[:30]  # Excel sheet name limit
+                                    sheet_name = data_type.replace('_', ' ')[:30]  # Excel sheet name limit
                                     df.to_excel(writer, sheet_name=sheet_name, index=False)
+                                    sheets_created += 1
+                                elif isinstance(data, dict) and data_type == "similarity_matrix":
+                                    # Handle similarity matrix specially
+                                    matrix_data = data.get('matrix', [])
+                                    if matrix_data:
+                                        df = pd.DataFrame(matrix_data)
+                                        df.to_excel(writer, sheet_name="Similarity Matrix", index=False)
+                                        sheets_created += 1
                             except Exception as e:
                                 st.warning(f"Could not add {data_type} to Excel: {str(e)}")
                     
-                    excel_data = output.getvalue()
-                    st.download_button(
-                        label="Download Complete Analysis (Excel)",
-                        data=excel_data,
-                        file_name=f"corpus_analysis_{timestamp}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
+                    if sheets_created > 0:
+                        excel_data = output.getvalue()
+                        st.download_button(
+                            label="📗 Download Complete Analysis (Excel)",
+                            data=excel_data,
+                            file_name=f"corpus_analysis_{timestamp}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="excel_download"
+                        )
+                    else:
+                        st.error("No data could be converted to Excel format")
+                        
+                except Exception as e:
+                    st.error(f"Error creating Excel file: {str(e)}")
+            
+            # Clear export data button
+            if st.button("🗑️ Clear Prepared Files"):
+                if hasattr(st.session_state, 'prepared_export_data'):
+                    del st.session_state.prepared_export_data
+                if hasattr(st.session_state, 'export_format'):
+                    del st.session_state.export_format
+                if hasattr(st.session_state, 'export_timestamp'):
+                    del st.session_state.export_timestamp
+                st.rerun()
 
     def _prepare_export_data(self, coordinator, export_options):
         """Prepare comprehensive export data package"""

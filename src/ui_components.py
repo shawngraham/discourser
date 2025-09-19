@@ -144,7 +144,7 @@ class UIComponents:
                             st.error(message)
                     else:
                         st.error("Please select a project")
-    
+
     def render_core_corpus_upload(self):
         """Render core corpus upload page"""
         st.header("Core Corpus Upload")
@@ -286,7 +286,7 @@ double blank line.
 
 Third paragraph and so on.
 """, language="text")
-    
+
     def render_target_corpus_upload(self):
         """Render target corpus upload page"""
         st.header("Target Corpus Upload")
@@ -400,7 +400,7 @@ Third paragraph and so on.
                 st.error("❌ Validation failed!")
                 for error in errors:
                     st.error(f"• {error}")
-    
+
     def render_analysis_page(self):
         """Render the analysis page with embedding generation"""
         st.header("Preprocessing/Analysis")
@@ -669,7 +669,7 @@ Third paragraph and so on.
                 if st.button("Continue to Results & Visualization"):
                     st.session_state.current_step = 'results'
                     st.rerun()
-    
+
     def render_vector_analysis_page(self):
         """Render the vector analysis and custom dimensions page"""
         st.header("Vector Analysis & Custom Dimensions")
@@ -688,9 +688,16 @@ Third paragraph and so on.
             st.warning("Please process the core corpus first.")
             return
         
-        # Main tabs for vector analysis
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Suggested Terms", "🎯 Create Vectors", "📈 Vector Analysis", "🗺️ Vector Spaces", "📝 Topic Modeling"])
-
+        # Main tabs for vector analysis including new PCA Analysis tab
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+            "📊 Suggested Terms", 
+            "🎯 Create Vectors", 
+            "📈 Vector Analysis", 
+            "🗺️ Vector Spaces", 
+            "🔍 Topic Modeling",
+            "🧮 PCA Analysis"  
+        ])
+        
         with tab1:
             self._render_suggested_terms_tab(coordinator)
         
@@ -705,7 +712,10 @@ Third paragraph and so on.
         
         with tab5:
             self._render_topic_modeling_tab(coordinator)
-    
+
+        with tab6:
+            self._render_pca_analysis_tab(coordinator)
+
     def _render_suggested_terms_tab(self, coordinator):
         """Render the suggested terms tab"""
         st.subheader("📊 Suggested Terms for Vector Creation")
@@ -781,7 +791,7 @@ Third paragraph and so on.
             st.info("Analyzing corpus for term suggestions...")
             if st.button("Refresh Term Analysis"):
                 st.rerun()
-    
+
     def _render_create_vectors_tab(self, coordinator):
         """Render the enhanced create vectors tab with improved mathematical methods"""
         st.subheader("🎯 Create Custom Vectors")
@@ -1103,7 +1113,7 @@ Third paragraph and so on.
                 """)
                 
             st.markdown(f"**Vectors created:** {len(existing_vectors)}/50")
-    
+
     def _render_vector_analysis_tab(self, coordinator):
         """Render the vector analysis tab"""
         st.subheader("📈 Vector Analysis")
@@ -1514,7 +1524,6 @@ Third paragraph and so on.
                 else:
                     st.error(message)
     
-    # Add this new tab to your vector analysis page
     def _render_topic_modeling_tab(self, coordinator):
         """Render topic modeling tab with BERTopic configuration"""
         st.subheader("📝 Topic Modeling with BERTopic")
@@ -1855,6 +1864,733 @@ Third paragraph and so on.
             - **TextGeneration**: AI-generated topic descriptions
             """)
 
+    def _render_pca_analysis_tab(self, coordinator):
+        """Render the PCA analysis tab with embedding space analysis"""
+        st.subheader("🧮 Principal Component Analysis of Embedding Space")
+        
+        st.markdown("""
+        Explore the mathematical structure of your embedding space using Principal Component Analysis (PCA).
+        This helps you understand which dimensions capture the most variation in your corpus.
+        """)
+        
+        # PCA Configuration
+        with st.expander("PCA Configuration", expanded=True):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                corpus_choice = st.radio(
+                    "Analyze which corpus:",
+                    ["Core Corpus", "Target Corpus", "Combined View"],
+                    help="Choose which corpus embeddings to analyze. Combined View shows both corpora in the same space."
+                )
+                
+                n_components = st.slider(
+                    "Number of principal components:",
+                    min_value=2,
+                    max_value=min(50, len(coordinator.core_embeddings) if coordinator.core_embeddings is not None else 50),
+                    value=10,
+                    help="How many principal components to compute and display"
+                )
+            
+            with col2:
+                st.markdown("### What is PCA?")
+                st.markdown("""
+                **Principal Component Analysis** finds the directions of maximum variance in your data.
+                
+                - **Component 1**: Direction with most variation
+                - **Component 2**: Second most variation (orthogonal to first)
+                - **Explained Variance**: How much of the total variation each component captures
+                
+                This helps identify the most important conceptual dimensions in your corpus.
+                """)
+        
+        # Run PCA Analysis
+        use_target = corpus_choice == "Target Corpus"
+        use_combined = corpus_choice == "Combined View"
+        
+        if use_combined:
+            corpus_name = "combined"
+        else:
+            corpus_name = "target" if use_target else "core"
+        
+        if st.button(f"🔬 Analyze {corpus_choice} Embedding Space", type="primary"):
+            with st.spinner(f"Running PCA analysis on {corpus_choice.lower()}..."):
+                
+                # Get embeddings to analyze based on selection
+                if use_combined:
+                    # Check both embeddings are available
+                    if coordinator.target_embeddings is None:
+                        st.error("Target corpus not processed yet. Both corpora needed for combined view.")
+                        return
+                    
+                    # Combine embeddings
+                    combined_embeddings = np.vstack([coordinator.core_embeddings, coordinator.target_embeddings])
+                    
+                    # Create combined metadata
+                    core_metadata = coordinator.core_metadata['paragraph_metadata']
+                    target_metadata = coordinator.target_metadata['paragraph_metadata']
+                    
+                    # Add corpus type to metadata
+                    combined_metadata = []
+                    for meta in core_metadata:
+                        meta_copy = meta.copy()
+                        meta_copy['corpus_type'] = 'Core'
+                        combined_metadata.append(meta_copy)
+                    
+                    for meta in target_metadata:
+                        meta_copy = meta.copy()
+                        meta_copy['corpus_type'] = 'Target'
+                        combined_metadata.append(meta_copy)
+                    
+                    embeddings = combined_embeddings
+                    metadata = combined_metadata
+                    
+                elif use_target:
+                    if coordinator.target_embeddings is None:
+                        st.error("Target corpus not processed yet.")
+                        return
+                    embeddings = coordinator.target_embeddings
+                    metadata = coordinator.target_metadata['paragraph_metadata']
+                else:
+                    embeddings = coordinator.core_embeddings
+                    metadata = coordinator.core_metadata['paragraph_metadata']
+                
+                # Perform PCA analysis
+                pca_results = coordinator.vector_analysis_engine.analyze_embedding_space(
+                    embeddings, n_components=n_components
+                )
+                
+                if pca_results:
+                    # Store results in session state
+                    st.session_state[f'pca_results_{corpus_name}'] = pca_results
+                    st.session_state[f'pca_metadata_{corpus_name}'] = metadata
+                    
+                    # Store additional info for combined view
+                    if use_combined:
+                        st.session_state[f'pca_corpus_split_{corpus_name}'] = {
+                            'core_count': len(coordinator.core_embeddings),
+                            'target_count': len(coordinator.target_embeddings)
+                        }
+                    
+                    st.success(f"✅ PCA analysis complete for {corpus_choice}!")
+                else:
+                    st.error("❌ PCA analysis failed. Please try again.")
+        
+        # Display results if they exist
+        results_key = f'pca_results_{corpus_name}'
+        metadata_key = f'pca_metadata_{corpus_name}'
+        
+        if results_key in st.session_state and st.session_state[results_key]:
+            pca_results = st.session_state[results_key]
+            metadata = st.session_state[metadata_key]
+            
+            st.markdown("---")
+            st.markdown(f"### 📈 PCA Results for {corpus_choice}")
+            
+            # Summary metrics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Original Dimensions", pca_results['original_dimensions'])
+            with col2:
+                st.metric("Components Analyzed", pca_results['reduced_dimensions'])
+            with col3:
+                st.metric("Total Variance Explained", f"{pca_results['total_variance_explained']:.1%}")
+            with col4:
+                # Calculate effective dimensionality (components needed for 90% variance)
+                cumulative_var = [comp['cumulative_variance'] for comp in pca_results['components']]
+                effective_dims = len([v for v in cumulative_var if v < 0.9]) + 1
+                st.metric("Effective Dimensions (90%)", effective_dims)
+            
+            # Variance explained visualization
+            st.markdown("### 📊 Variance Explained by Components")
+            
+            try:
+                import plotly.express as px
+                import plotly.graph_objects as go
+                
+                # Create DataFrame for plotting
+                components_data = []
+                for i, comp in enumerate(pca_results['components']):
+                    components_data.append({
+                        'Component': f'PC{i+1}',
+                        'Component_Number': i+1,
+                        'Individual_Variance': comp['explained_variance'] * 100,
+                        'Cumulative_Variance': comp['cumulative_variance'] * 100
+                    })
+                
+                df_components = pd.DataFrame(components_data)
+                
+                # Create subplot with secondary y-axis
+                fig = go.Figure()
+                
+                # Bar chart for individual variance
+                fig.add_trace(go.Bar(
+                    x=df_components['Component'],
+                    y=df_components['Individual_Variance'],
+                    name='Individual Variance',
+                    marker_color='lightblue',
+                    yaxis='y1'
+                ))
+                
+                # Line chart for cumulative variance
+                fig.add_trace(go.Scatter(
+                    x=df_components['Component'],
+                    y=df_components['Cumulative_Variance'],
+                    name='Cumulative Variance',
+                    line=dict(color='red', width=3),
+                    marker=dict(size=8),
+                    yaxis='y2'
+                ))
+                
+                # Add 90% variance line
+                fig.add_hline(y=90, line_dash="dash", line_color="green", 
+                             annotation_text="90% Variance Threshold")
+                
+                # Update layout
+                fig.update_layout(
+                    title="Principal Components: Individual vs Cumulative Variance Explained",
+                    xaxis=dict(title="Principal Component"),
+                    yaxis=dict(title="Individual Variance (%)", side="left"),
+                    yaxis2=dict(title="Cumulative Variance (%)", side="right", overlaying="y"),
+                    height=500,
+                    hovermode='x unified'
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+            except ImportError:
+                st.warning("Install plotly for interactive visualizations: `pip install plotly`")
+                
+                # Fallback table display
+                st.markdown("**Component Variance Table:**")
+                variance_data = []
+                for i, comp in enumerate(pca_results['components']):
+                    variance_data.append({
+                        'Component': f'PC{i+1}',
+                        'Individual Variance': f"{comp['explained_variance']:.1%}",
+                        'Cumulative Variance': f"{comp['cumulative_variance']:.1%}"
+                    })
+                
+                st.dataframe(pd.DataFrame(variance_data), use_container_width=True)
+            
+            # Component analysis
+            st.markdown("### 🔍 Component Analysis")
+            
+            # Select component to examine
+            selected_component = st.selectbox(
+                "Select component to examine in detail:",
+                options=range(len(pca_results['components'])),
+                format_func=lambda x: f"PC{x+1} ({pca_results['components'][x]['explained_variance']:.1%} variance)"
+            )
+            
+            if selected_component is not None:
+                comp_info = pca_results['components'][selected_component]
+                
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    st.markdown(f"#### Principal Component {selected_component + 1}")
+                    st.write(f"**Individual Variance Explained:** {comp_info['explained_variance']:.1%}")
+                    st.write(f"**Cumulative Variance Explained:** {comp_info['cumulative_variance']:.1%}")
+                    
+                    # Show component vector visualization if possible
+                    component_vector = np.array(comp_info['component_vector'])
+                    
+                    # Find the strongest dimensions in this component
+                    abs_weights = np.abs(component_vector)
+                    top_dimensions = np.argsort(abs_weights)[-20:][::-1]  # Top 20 dimensions
+                    
+                    st.markdown("**Strongest Dimensions in this Component:**")
+                    
+                    dim_data = []
+                    for dim_idx in top_dimensions:
+                        dim_data.append({
+                            'Dimension': f'Dim_{dim_idx}',
+                            'Weight': f"{component_vector[dim_idx]:.4f}",
+                            'Absolute Weight': f"{abs_weights[dim_idx]:.4f}"
+                        })
+                    
+                    dim_df = pd.DataFrame(dim_data)
+                    st.dataframe(dim_df, use_container_width=True)
+                
+                with col2:
+                    st.markdown("#### Interpretation Guide")
+                    
+                    variance_pct = comp_info['explained_variance']
+                    
+                    if variance_pct > 0.1:
+                        st.success("🟢 **High Importance**")
+                        st.write("This component captures major variation in your corpus.")
+                    elif variance_pct > 0.05:
+                        st.info("🟡 **Moderate Importance**")
+                        st.write("This component captures meaningful but secondary variation.")
+                    else:
+                        st.warning("🔴 **Low Importance**")
+                        st.write("This component captures minor variation - may represent noise.")
+                    
+                    st.markdown("**What this means:**")
+                    st.write(f"• Explains {variance_pct:.1%} of total variation")
+                    st.write(f"• Ranking: {selected_component + 1} out of {len(pca_results['components'])}")
+                    
+                    if selected_component == 0:
+                        st.write("• **Primary conceptual dimension** in your corpus")
+                    elif selected_component == 1:
+                        st.write("• **Secondary conceptual dimension** in your corpus")
+                    else:
+                        st.write("• Captures more specialized patterns")
+            
+            # Document projections onto components
+            st.markdown("### 📍 Document Positions in Principal Component Space")
+            
+            if 'pca_embeddings' in pca_results:
+                pca_embeddings = pca_results['pca_embeddings']
+                
+                # Allow user to select which components to visualize
+                col1, col2 = st.columns(2)
+                with col1:
+                    pc_x = st.selectbox("X-axis (PC):", range(len(pca_results['components'])), 
+                                       format_func=lambda x: f"PC{x+1}")
+                with col2:
+                    pc_y = st.selectbox("Y-axis (PC):", range(len(pca_results['components'])), 
+                                       index=1 if len(pca_results['components']) > 1 else 0,
+                                       format_func=lambda x: f"PC{x+1}")
+                
+                if pc_x != pc_y and st.button("🗺️ Create PCA Scatter Plot"):
+                    try:
+                        import plotly.express as px
+                        
+                        # Check if this is a combined view
+                        is_combined = corpus_name == "combined"
+                        
+                        # Prepare data for plotting
+                        plot_data = []
+                        for i, meta in enumerate(metadata):
+                            if i < len(pca_embeddings):
+                                data_point = {
+                                    'x': pca_embeddings[i, pc_x],
+                                    'y': pca_embeddings[i, pc_y],
+                                    'title': meta['document_metadata']['title'][:50] + "...",
+                                    'author': meta['document_metadata']['author'],
+                                    'filename': meta['filename'],
+                                    'paragraph': meta['paragraph_index'] + 1
+                                }
+                                
+                                # Add corpus type for combined view
+                                if is_combined:
+                                    data_point['corpus'] = meta['corpus_type']
+                                    data_point['hover_info'] = f"{meta['corpus_type']}: {meta['document_metadata']['title'][:40]}... (Para {meta['paragraph_index'] + 1})"
+                                else:
+                                    data_point['corpus'] = corpus_choice.replace(" Corpus", "")
+                                    data_point['hover_info'] = f"{meta['document_metadata']['title'][:40]}... (Para {meta['paragraph_index'] + 1})"
+                                
+                                plot_data.append(data_point)
+                        
+                        df_plot = pd.DataFrame(plot_data)
+                        
+                        # Create scatter plot with proper color coding
+                        if is_combined:
+                            # Combined view with distinct colors for each corpus
+                            fig = px.scatter(
+                                df_plot,
+                                x='x',
+                                y='y',
+                                color='corpus',
+                                hover_data=['title', 'author', 'filename', 'paragraph'],
+                                title=f"Combined Corpus View: PC{pc_x+1} vs PC{pc_y+1}",
+                                labels={
+                                    'x': f'PC{pc_x+1} ({pca_results["components"][pc_x]["explained_variance"]:.1%} variance)',
+                                    'y': f'PC{pc_y+1} ({pca_results["components"][pc_y]["explained_variance"]:.1%} variance)',
+                                    'corpus': 'Corpus Type'
+                                },
+                                color_discrete_map={
+                                    'Core': '#FF6B6B',      # Distinct red for core
+                                    'Target': '#4ECDC4'     # Distinct teal for target
+                                }
+                            )
+                            
+                            # Add analysis insights for combined view
+                            st.markdown("### 📊 Combined Corpus Analysis")
+                            
+                            # Calculate clustering metrics
+                            core_points = df_plot[df_plot['corpus'] == 'Core'][['x', 'y']].values
+                            target_points = df_plot[df_plot['corpus'] == 'Target'][['x', 'y']].values
+                            
+                            if len(core_points) > 0 and len(target_points) > 0:
+                                # Calculate average distance between core and target centroids
+                                core_centroid = np.mean(core_points, axis=0)
+                                target_centroid = np.mean(target_points, axis=0)
+                                centroid_distance = np.linalg.norm(core_centroid - target_centroid)
+                                
+                                # Calculate overlap using convex hull or simple bounding box
+                                core_spread = np.std(core_points, axis=0).mean()
+                                target_spread = np.std(target_points, axis=0).mean()
+                                
+                                # Display clustering insights
+                                col_c1, col_c2, col_c3, col_c4 = st.columns(4)
+                                with col_c1:
+                                    st.metric("Centroid Distance", f"{centroid_distance:.3f}")
+                                with col_c2:
+                                    st.metric("Core Spread", f"{core_spread:.3f}")
+                                with col_c3:
+                                    st.metric("Target Spread", f"{target_spread:.3f}")
+                                with col_c4:
+                                    if max(core_spread, target_spread) > 0:
+                                        overlap_ratio = min(core_spread, target_spread) / max(core_spread, target_spread)
+                                    else:
+                                        overlap_ratio = 0
+                                    st.metric("Relative Overlap", f"{overlap_ratio:.3f}")
+                                
+                                # Provide interpretation
+                                st.markdown("#### Spatial Relationship Analysis")
+                                if centroid_distance < 1.0:
+                                    st.success("🔗 **Strong Spatial Alignment**: Core and target corpora occupy similar conceptual space")
+                                elif centroid_distance < 2.0:
+                                    st.info("🔄 **Moderate Alignment**: Some conceptual overlap with distinct regions")
+                                else:
+                                    st.warning("📍 **Distinct Territories**: Core and target occupy different conceptual spaces")
+                                
+                                # Find mixed clusters - areas with both core and target documents
+                                mixed_regions = self._find_mixed_clusters(df_plot)
+                                if mixed_regions:
+                                    st.markdown("#### 🎯 High Influence Regions")
+                                    st.write(f"Found {len(mixed_regions)} regions with mixed core-target content, indicating direct conceptual influence.")
+                                
+                        else:
+                            # Single corpus view
+                            fig = px.scatter(
+                                df_plot,
+                                x='x',
+                                y='y',
+                                hover_data=['title', 'author', 'filename', 'paragraph'],
+                                title=f"Documents in PC{pc_x+1} vs PC{pc_y+1} Space",
+                                labels={
+                                    'x': f'PC{pc_x+1} ({pca_results["components"][pc_x]["explained_variance"]:.1%} variance)',
+                                    'y': f'PC{pc_y+1} ({pca_results["components"][pc_y]["explained_variance"]:.1%} variance)'
+                                }
+                            )
+                        
+                        # Add origin lines
+                        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+                        fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
+                        
+                        # Enhanced layout for combined view
+                        if is_combined:
+                            fig.update_layout(
+                                height=700,
+                                legend=dict(
+                                    yanchor="top",
+                                    y=0.99,
+                                    xanchor="left",
+                                    x=0.01,
+                                    bgcolor="rgba(255,255,255,0.8)"
+                                )
+                            )
+                            
+                            # Add quadrant analysis for combined view
+                            quadrant_analysis = self._analyze_quadrant_distribution(df_plot)
+                            if quadrant_analysis:
+                                with st.expander("📊 Quadrant Distribution Analysis", expanded=False):
+                                    st.write("**Distribution of Core vs Target documents across PCA quadrants:**")
+                                    
+                                    quad_cols = st.columns(4)
+                                    for i, (quad_name, quad_data) in enumerate(quadrant_analysis.items()):
+                                        with quad_cols[i]:
+                                            st.write(f"**{quad_name}**")
+                                            st.write(f"Core: {quad_data['core_count']}")
+                                            st.write(f"Target: {quad_data['target_count']}")
+                                            
+                                            if quad_data['core_count'] > 0 and quad_data['target_count'] > 0:
+                                                st.success("Mixed")
+                                            elif quad_data['core_count'] > quad_data['target_count']:
+                                                st.info("Core-dominated")
+                                            else:
+                                                st.warning("Target-dominated")
+                        else:
+                            fig.update_layout(height=600)
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                    except ImportError:
+                        st.warning("Install plotly for PCA scatter plots")
+            
+            # Show insights and recommendations
+            if corpus_name == "combined":
+                # Use the combined corpus insights methods
+                insights = self._generate_combined_corpus_insights(pca_results, coordinator)
+                recommendations = self._generate_combined_corpus_recommendations(pca_results, coordinator)
+            else:
+                # Use regular PCA insights methods
+                insights = self._generate_pca_insights(pca_results, corpus_choice)
+                recommendations = self._generate_pca_recommendations(pca_results, coordinator)
+            
+            if insights:
+                st.markdown("### 💡 Key Insights")
+                for insight in insights:
+                    st.write(f"• {insight}")
+            
+            if recommendations:
+                st.markdown("### 📋 Recommendations")
+                for rec in recommendations:
+                    st.write(f"• {rec}")
+
+    def _find_mixed_clusters(self, df_plot):
+        """Find regions with both core and target documents (indicating influence zones)"""
+        try:
+            # Simple grid-based approach to find mixed regions
+            mixed_regions = []
+            
+            # Create a grid and count core/target in each cell
+            x_min, x_max = df_plot['x'].min(), df_plot['x'].max()
+            y_min, y_max = df_plot['y'].min(), df_plot['y'].max()
+            
+            grid_size = 5  # 5x5 grid
+            x_step = (x_max - x_min) / grid_size
+            y_step = (y_max - y_min) / grid_size
+            
+            for i in range(grid_size):
+                for j in range(grid_size):
+                    x_start, x_end = x_min + i * x_step, x_min + (i + 1) * x_step
+                    y_start, y_end = y_min + j * y_step, y_min + (j + 1) * y_step
+                    
+                    # Find documents in this grid cell
+                    cell_docs = df_plot[
+                        (df_plot['x'] >= x_start) & (df_plot['x'] < x_end) &
+                        (df_plot['y'] >= y_start) & (df_plot['y'] < y_end)
+                    ]
+                    
+                    if len(cell_docs) > 2:  # Need minimum documents
+                        core_count = len(cell_docs[cell_docs['corpus'] == 'Core'])
+                        target_count = len(cell_docs[cell_docs['corpus'] == 'Target'])
+                        
+                        # Mixed region if both core and target present
+                        if core_count > 0 and target_count > 0:
+                            mixed_regions.append({
+                                'x_center': (x_start + x_end) / 2,
+                                'y_center': (y_start + y_end) / 2,
+                                'core_count': core_count,
+                                'target_count': target_count,
+                                'total_count': len(cell_docs)
+                            })
+            
+            return mixed_regions
+        except Exception:
+            return []
+
+    def _analyze_quadrant_distribution(self, df_plot):
+        """Analyze distribution of core vs target documents across quadrants"""
+        try:
+            # Determine quadrants based on origin (0,0)
+            quadrants = {
+                'Q1 (+,+)': {'core_count': 0, 'target_count': 0},
+                'Q2 (-,+)': {'core_count': 0, 'target_count': 0},
+                'Q3 (-,-)': {'core_count': 0, 'target_count': 0},
+                'Q4 (+,-)': {'core_count': 0, 'target_count': 0}
+            }
+            
+            for _, row in df_plot.iterrows():
+                x, y = row['x'], row['y']
+                corpus_type = row['corpus']
+                
+                # Determine quadrant
+                if x >= 0 and y >= 0:
+                    quad = 'Q1 (+,+)'
+                elif x < 0 and y >= 0:
+                    quad = 'Q2 (-,+)'
+                elif x < 0 and y < 0:
+                    quad = 'Q3 (-,-)'
+                else:  # x >= 0 and y < 0
+                    quad = 'Q4 (+,-)'
+                
+                # Count by corpus type
+                if corpus_type == 'Core':
+                    quadrants[quad]['core_count'] += 1
+                else:
+                    quadrants[quad]['target_count'] += 1
+            
+            return quadrants
+        except Exception:
+            return None
+
+    def _generate_combined_corpus_insights(self, pca_results: Dict, coordinator) -> List[str]:
+        """Generate insights specific to combined corpus analysis"""
+        insights = []
+        
+        # Check if core/target metadata is available
+        if hasattr(st.session_state, 'combined_pca_metadata'):
+            metadata = st.session_state.combined_pca_metadata
+            core_count = len([m for m in metadata if m['corpus_type'] == 'Core'])
+            target_count = len([m for m in metadata if m['corpus_type'] == 'Target'])
+            
+            insights.append(f"Analyzed {core_count} core documents and {target_count} target documents in unified space")
+            
+            # Variance concentration
+            first_comp_var = pca_results['components'][0]['explained_variance']
+            if first_comp_var > 0.4:
+                insights.append("Strong primary conceptual dimension dominates both corpora")
+            elif first_comp_var < 0.15:
+                insights.append("Conceptual complexity is distributed across multiple dimensions")
+            
+            # Total variance captured
+            total_var = pca_results['total_variance_explained']
+            if total_var > 0.8:
+                insights.append("The selected components capture most conceptual variation")
+            else:
+                insights.append("Additional components may be needed to fully represent the conceptual space")
+        
+        return insights
+
+    def _generate_combined_corpus_recommendations(self, pca_results: Dict, coordinator) -> List[str]:
+        """Generate recommendations for combined corpus analysis"""
+        recommendations = []
+        
+        components = pca_results['components']
+        
+        if len(components) >= 2:
+            first_var = components[0]['explained_variance']
+            second_var = components[1]['explained_variance']
+            
+            if first_var > 0.3:
+                recommendations.append("Focus custom vector creation on the primary dimension (PC1)")
+            
+            if second_var > 0.15:
+                recommendations.append("Consider 2D vector spaces using PC1 and PC2 as axes")
+        
+        # Similarity analysis recommendations
+        if hasattr(st.session_state, 'similarity_matrix'):
+            recommendations.append("Cross-reference PCA clusters with similarity analysis results")
+        else:
+            recommendations.append("Run similarity analysis to complement the spatial relationship findings")
+        
+        # Vector creation recommendations
+        if not hasattr(coordinator, 'custom_vector_manager') or not coordinator.custom_vector_manager.custom_vectors:
+            recommendations.append("Create custom vectors that align with the discovered principal components")
+        
+        recommendations.append("Use the spatial separation insights to inform interpretation of influence patterns")
+        
+        return recommendations
+
+    def _generate_pca_insights(self, pca_results: Dict, corpus_choice: str) -> List[str]:
+        """Generate insights based on PCA results"""
+        insights = []
+        
+        total_variance = pca_results['total_variance_explained']
+        components = pca_results['components']
+        
+        # Overall structure insights
+        if total_variance > 0.8:
+            insights.append(f"Your {corpus_choice.lower()} has well-defined structure - the top {len(components)} components capture {total_variance:.1%} of variation")
+        elif total_variance > 0.6:
+            insights.append(f"Your {corpus_choice.lower()} has moderate structure - may benefit from more components for full representation")
+        else:
+            insights.append(f"Your {corpus_choice.lower()} is highly complex - variation is spread across many dimensions")
+        
+        # Component concentration insights
+        if len(components) > 0:
+            first_component_var = components[0]['explained_variance']
+            if first_component_var > 0.3:
+                insights.append(f"Strong primary conceptual dimension (PC1 explains {first_component_var:.1%})")
+            elif first_component_var < 0.1:
+                insights.append("No dominant conceptual dimension - corpus covers diverse themes")
+        
+        # Effective dimensionality
+        effective_dims = len([comp for comp in components if comp['cumulative_variance'] < 0.9])
+        if effective_dims <= 3:
+            insights.append(f"Corpus can be effectively represented in {effective_dims} dimensions")
+        elif effective_dims > 10:
+            insights.append("High-dimensional corpus - many independent themes present")
+        
+        return insights
+
+    def _generate_pca_recommendations(self, pca_results: Dict, coordinator) -> List[str]:
+        """Generate recommendations based on PCA results"""
+        recommendations = []
+        
+        components = pca_results['components']
+        
+        if len(components) >= 2:
+            # Vector creation recommendations
+            recommendations.append("Consider creating custom vectors aligned with your top principal components")
+            
+            first_var = components[0]['explained_variance']
+            second_var = components[1]['explained_variance']
+            
+            if first_var / second_var > 3:
+                recommendations.append("PC1 is much stronger than PC2 - focus vector creation on the primary dimension")
+            else:
+                recommendations.append("PC1 and PC2 are comparable - consider 2D vector spaces for analysis")
+        
+        # Analysis recommendations based on variance distribution
+        total_variance = pca_results['total_variance_explained']
+        if total_variance < 0.7:
+            recommendations.append("Consider increasing the number of components or examining specific sub-themes")
+        
+        # Custom vector alignment recommendation
+        if hasattr(coordinator, 'custom_vector_manager') and coordinator.custom_vector_manager.custom_vectors:
+            recommendations.append("Compare your custom vectors to principal components to validate vector quality")
+        else:
+            recommendations.append("Use PCA insights to inform custom vector creation - align vectors with natural data structure")
+        
+        return recommendations
+
+    def _generate_combined_corpus_insights(self, pca_results: Dict, coordinator) -> List[str]:
+        """Generate insights specific to combined corpus analysis"""
+        insights = []
+        
+        # Check if core/target metadata is available
+        metadata_key = 'pca_metadata_combined'
+        if metadata_key in st.session_state:
+            metadata = st.session_state[metadata_key]
+            core_count = len([m for m in metadata if m['corpus_type'] == 'Core'])
+            target_count = len([m for m in metadata if m['corpus_type'] == 'Target'])
+            
+            insights.append(f"Analyzed {core_count} core documents and {target_count} target documents in unified space")
+            
+            # Variance concentration
+            first_comp_var = pca_results['components'][0]['explained_variance']
+            if first_comp_var > 0.4:
+                insights.append("Strong primary conceptual dimension dominates both corpora")
+            elif first_comp_var < 0.15:
+                insights.append("Conceptual complexity is distributed across multiple dimensions")
+            
+            # Total variance captured
+            total_var = pca_results['total_variance_explained']
+            if total_var > 0.8:
+                insights.append("The selected components capture most conceptual variation")
+            else:
+                insights.append("Additional components may be needed to fully represent the conceptual space")
+        
+        return insights
+
+    def _generate_combined_corpus_recommendations(self, pca_results: Dict, coordinator) -> List[str]:
+        """Generate recommendations for combined corpus analysis"""
+        recommendations = []
+        
+        components = pca_results['components']
+        
+        if len(components) >= 2:
+            first_var = components[0]['explained_variance']
+            second_var = components[1]['explained_variance']
+            
+            if first_var > 0.3:
+                recommendations.append("Focus custom vector creation on the primary dimension (PC1)")
+            
+            if second_var > 0.15:
+                recommendations.append("Consider 2D vector spaces using PC1 and PC2 as axes")
+        
+        # Similarity analysis recommendations
+        if hasattr(st.session_state, 'similarity_matrix'):
+            recommendations.append("Cross-reference PCA clusters with similarity analysis results")
+        else:
+            recommendations.append("Run similarity analysis to complement the spatial relationship findings")
+        
+        # Vector creation recommendations
+        if not hasattr(coordinator, 'custom_vector_manager') or not coordinator.custom_vector_manager.custom_vectors:
+            recommendations.append("Create custom vectors that align with the discovered principal components")
+        
+        recommendations.append("Use the spatial separation insights to inform interpretation of influence patterns")
+        
+        return recommendations
+
     def render_comprehensive_results(self):
         """Render comprehensive results page with all analyses and export options"""
         st.header("📊 Comprehensive Analysis Results")
@@ -1901,6 +2637,9 @@ Third paragraph and so on.
             self._render_detailed_reports(coordinator)
         
         with tab6:
+            self._render_pca_analysis_tab(coordinator)
+        
+        with tab7:
             self._render_export_section(coordinator)
 
     def _render_executive_summary(self, coordinator):

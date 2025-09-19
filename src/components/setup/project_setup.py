@@ -15,7 +15,7 @@ class ProjectSetupComponent(BaseComponent):
             
             **Getting Started:**
             1. Create a new project or load an existing one
-            2. Upload your core corpus (influential academic texts)
+            2. Upload your core corpus (the influential source documents)
             3. Upload your target corpus (documents to analyze)
             4. Define analysis vectors and run analysis
             5. Explore results and generate reports

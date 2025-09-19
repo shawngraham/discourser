@@ -10,7 +10,6 @@ class VectorAnalysisComponent(BaseComponent):
         super().__init__()
         self.topic_modeling = TopicModelingComponent()
 
-
     def render_vector_analysis_page(self):
         """Render the vector analysis and custom dimensions page"""
         st.header("Vector Analysis & Custom Dimensions")
@@ -456,7 +455,7 @@ class VectorAnalysisComponent(BaseComponent):
             st.markdown(f"**Vectors created:** {len(existing_vectors)}/50")
 
     def _render_vector_analysis_tab(self, coordinator):
-        """Render the vector analysis tab"""
+        """Render the vector analysis tab with combined corpus support"""
         st.subheader("📈 Vector Analysis")
         
         existing_vectors = coordinator.custom_vector_manager.list_vectors()
@@ -469,88 +468,240 @@ class VectorAnalysisComponent(BaseComponent):
         vector_names = [v['name'] for v in existing_vectors]
         selected_vector = st.selectbox("Select vector to analyze:", vector_names)
         
-        # Corpus selection
-        corpus_choice = st.radio("Analyze which corpus:", ["Target Corpus", "Core Corpus"])
-        use_target = corpus_choice == "Target Corpus"
+        # Enhanced corpus selection with combined option
+        corpus_options = ["Target Corpus", "Core Corpus"]
+        
+        # Check if we can offer combined corpus analysis
+        if coordinator.target_embeddings is not None:
+            corpus_options.append("Combined Corpus (Overlap Analysis)")
+        
+        corpus_choice = st.radio("Analyze which corpus:", corpus_options)
+        
+        # Show info about combined corpus option
+        if "Combined Corpus" in corpus_choice:
+            st.info("🔄 Combined corpus analysis shows how core and target documents distribute along your custom vector, revealing overlap patterns similar to PCA analysis.")
         
         if selected_vector:
             if st.button("Analyze Vector Projections"):
-                with st.spinner("Analyzing vector projections..."):
-                    success, results, message = coordinator.analyze_document_projections(
-                        selected_vector, use_target=use_target
-                    )
                 
-                if success:
-                    st.success(message)
-                    
-                    # Display results
-                    proj_results = results['projection_results']
-                    performance = results['performance_analysis']
-                    extremes = results['extreme_documents']
-                    vector_info = results['vector_info']
-                    
-                    # Vector information
-                    with st.expander("Vector Information", expanded=True):
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.write(f"**Positive terms:** {', '.join(vector_info['positive_terms'])}")
-                        with col2:
-                            st.write(f"**Negative terms:** {', '.join(vector_info['negative_terms']) or 'None'}")
+                if "Combined Corpus" in corpus_choice:
+                    # Combined corpus analysis path
+                    with st.spinner("Creating combined corpus analysis..."):
                         
-                        if vector_info['description']:
-                            st.write(f"**Description:** {vector_info['description']}")
+                        # Ensure combined embeddings exist
+                        if coordinator.combined_embeddings is None:
+                            success, message = coordinator.create_combined_corpus_embeddings()
+                            if not success:
+                                st.error(f"Failed to create combined corpus: {message}")
+                                return
+                        
+                        # Use the overlap analysis method
+                        success, results, message = coordinator.analyze_corpus_overlap_on_vector(selected_vector)
                     
-                    # Statistics
-                    st.markdown("### Projection Statistics")
-                    stats = proj_results['statistics']
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Mean", f"{stats['mean_projection']:.3f}")
-                        st.metric("Std Dev", f"{stats['std_projection']:.3f}")
-                    with col2:
-                        st.metric("Min", f"{stats['min_projection']:.3f}")
-                        st.metric("Max", f"{stats['max_projection']:.3f}")
-                    with col3:
-                        st.metric("Range", f"{stats['max_projection'] - stats['min_projection']:.3f}")
-                        st.metric("Median", f"{stats['median_projection']:.3f}")
-                    with col4:
-                        st.metric("Q25", f"{stats['q25_projection']:.3f}")
-                        st.metric("Q75", f"{stats['q75_projection']:.3f}")
-                    
-                    # Performance analysis
-                    if performance:
-                        st.markdown("### Vector Performance")
-                        st.write(f"**Performance Category:** {performance['performance_category']}")
-                        
-                        st.markdown("**Recommendations:**")
-                        for rec in performance['recommendations']:
-                            st.write(f"• {rec}")
-                    
-                    # Extreme documents
-                    if extremes:
-                        st.markdown("### Extreme Documents")
-                        
-                        col1, col2, col3 = st.columns(3)
-                        
-                        with col1:
-                            st.markdown("**Most Positive**")
-                            for doc in extremes['most_positive'][:3]:
-                                st.write(f"• {doc['document_metadata']['document_metadata']['title'][:50]}... ({doc['projection_score']:.3f})")
-                        
-                        with col2:
-                            st.markdown("**Most Negative**")
-                            for doc in extremes['most_negative'][:3]:
-                                st.write(f"• {doc['document_metadata']['document_metadata']['title'][:50]}... ({doc['projection_score']:.3f})")
-                        
-                        with col3:
-                            st.markdown("**Most Neutral**")
-                            for doc in extremes['most_neutral'][:3]:
-                                st.write(f"• {doc['document_metadata']['document_metadata']['title'][:50]}... ({doc['projection_score']:.3f})")
+                    if success:
+                        st.success(message)
+                        self._display_combined_corpus_results(results)
+                    else:
+                        st.error(message)
                 
                 else:
-                    st.error(message)
-    
+                    # Regular single corpus analysis
+                    use_target = corpus_choice == "Target Corpus"
+                    
+                    with st.spinner("Analyzing vector projections..."):
+                        success, results, message = coordinator.analyze_document_projections(
+                            selected_vector, use_target=use_target
+                        )
+                    
+                    if success:
+                        st.success(message)
+                        self._display_single_corpus_results(results)
+                    else:
+                        st.error(message)
+
+    def _display_combined_corpus_results(self, results):
+        """Display combined corpus overlap analysis results"""
+        # Overview metrics
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Core Documents", results['core_statistics']['count'])
+            st.metric("Core Mean", f"{results['core_statistics']['mean']:.3f}")
+        
+        with col2:
+            st.metric("Target Documents", results['target_statistics']['count'])
+            st.metric("Target Mean", f"{results['target_statistics']['mean']:.3f}")
+        
+        with col3:
+            overlap_metrics = results['overlap_metrics']
+            st.metric("Mean Difference", f"{overlap_metrics['mean_difference']:.3f}")
+            if 'range_overlap_ratio' in overlap_metrics:
+                st.metric("Range Overlap", f"{overlap_metrics['range_overlap_ratio']:.1%}")
+        
+        # Interpretation
+        if 'overlap_interpretation' in results['overlap_metrics']:
+            st.info(f"**Interpretation:** {results['overlap_metrics']['overlap_interpretation']}")
+        
+        # Distribution visualization
+        try:
+            import plotly.graph_objects as go
+            
+            core_scores = [p['projection_score'] for p in results['core_projections']]
+            target_scores = [p['projection_score'] for p in results['target_projections']]
+            
+            # Create distribution plot
+            fig = go.Figure()
+            
+            # Add histograms
+            fig.add_trace(go.Histogram(
+                x=core_scores,
+                name="Core Corpus",
+                opacity=0.7,
+                nbinsx=30,
+                histnorm='probability density'
+            ))
+            
+            fig.add_trace(go.Histogram(
+                x=target_scores,
+                name="Target Corpus",
+                opacity=0.7,
+                nbinsx=30,
+                histnorm='probability density'
+            ))
+            
+            # Add mean lines
+            fig.add_vline(
+                x=results['core_statistics']['mean'],
+                line_dash="dash",
+                line_color="blue",
+                annotation_text="Core Mean"
+            )
+            
+            fig.add_vline(
+                x=results['target_statistics']['mean'],
+                line_dash="dash",
+                line_color="red",
+                annotation_text="Target Mean"
+            )
+            
+            fig.update_layout(
+                title=f"Corpus Distribution Overlap: {results['vector_name']}",
+                xaxis_title="Projection Score",
+                yaxis_title="Density",
+                barmode='overlay'
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+        except ImportError:
+            st.warning("Install plotly for distribution visualizations")
+        
+        # Extreme documents from both corpora
+        with st.expander("Extreme Documents"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("**Highest Scoring Documents:**")
+                all_projections = results['core_projections'] + results['target_projections']
+                top_docs = sorted(all_projections, key=lambda x: x['projection_score'], reverse=True)[:5]
+                
+                for i, doc in enumerate(top_docs, 1):
+                    corpus_type = doc['document_metadata']['corpus_type']
+                    title = doc['document_metadata']['document_metadata']['title']
+                    score = doc['projection_score']
+                    st.write(f"{i}. [{corpus_type.upper()}] {title[:50]}... (score: {score:.3f})")
+            
+            with col2:
+                st.write("**Lowest Scoring Documents:**")
+                bottom_docs = sorted(all_projections, key=lambda x: x['projection_score'])[:5]
+                
+                for i, doc in enumerate(bottom_docs, 1):
+                    corpus_type = doc['document_metadata']['corpus_type']
+                    title = doc['document_metadata']['document_metadata']['title']
+                    score = doc['projection_score']
+                    st.write(f"{i}. [{corpus_type.upper()}] {title[:50]}... (score: {score:.3f})")
+        
+        # Statistical comparison
+        if 'distribution_comparison' in results:
+            with st.expander("Statistical Analysis"):
+                dist_comp = results['distribution_comparison']
+                if 'statistical_tests' in dist_comp and 'error' not in dist_comp['statistical_tests']:
+                    tests = dist_comp['statistical_tests']
+                    
+                    if 'mann_whitney_u' in tests:
+                        mw = tests['mann_whitney_u']
+                        st.write(f"**Mann-Whitney U Test:** p-value = {mw['p_value']:.4f}")
+                        if mw['p_value'] < 0.05:
+                            st.write("→ Distributions are significantly different")
+                        else:
+                            st.write("→ No significant difference detected")
+
+    def _display_single_corpus_results(self, results):
+        """Display regular single corpus analysis results (your existing method)"""
+        proj_results = results['projection_results']
+        performance = results['performance_analysis']
+        extremes = results['extreme_documents']
+        vector_info = results['vector_info']
+        
+        # Vector information
+        with st.expander("Vector Information", expanded=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write(f"**Positive terms:** {', '.join(vector_info['positive_terms'])}")
+            with col2:
+                st.write(f"**Negative terms:** {', '.join(vector_info['negative_terms']) or 'None'}")
+            
+            if vector_info['description']:
+                st.write(f"**Description:** {vector_info['description']}")
+        
+        # Statistics
+        st.markdown("### Projection Statistics")
+        stats = proj_results['statistics']
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Mean", f"{stats['mean_projection']:.3f}")
+            st.metric("Std Dev", f"{stats['std_projection']:.3f}")
+        with col2:
+            st.metric("Min", f"{stats['min_projection']:.3f}")
+            st.metric("Max", f"{stats['max_projection']:.3f}")
+        with col3:
+            st.metric("Range", f"{stats['max_projection'] - stats['min_projection']:.3f}")
+            st.metric("Median", f"{stats['median_projection']:.3f}")
+        with col4:
+            st.metric("Q25", f"{stats['q25_projection']:.3f}")
+            st.metric("Q75", f"{stats['q75_projection']:.3f}")
+        
+        # Performance analysis
+        if performance:
+            st.markdown("### Vector Performance")
+            st.write(f"**Performance Category:** {performance['performance_category']}")
+            
+            st.markdown("**Recommendations:**")
+            for rec in performance['recommendations']:
+                st.write(f"• {rec}")
+        
+        # Extreme documents
+        if extremes:
+            st.markdown("### Extreme Documents")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.markdown("**Most Positive**")
+                for doc in extremes['most_positive'][:3]:
+                    st.write(f"• {doc['document_metadata']['document_metadata']['title'][:50]}... ({doc['projection_score']:.3f})")
+            
+            with col2:
+                st.markdown("**Most Negative**")
+                for doc in extremes['most_negative'][:3]:
+                    st.write(f"• {doc['document_metadata']['document_metadata']['title'][:50]}... ({doc['projection_score']:.3f})")
+            
+            with col3:
+                st.markdown("**Most Neutral**")
+                for doc in extremes['most_neutral'][:3]:
+                    st.write(f"• {doc['document_metadata']['document_metadata']['title'][:50]}... ({doc['projection_score']:.3f})")
+
     def _render_vector_spaces_tab(self, coordinator):
         """Render the vector spaces tab with interactive plots"""
         st.subheader("🗺️ Multi-Dimensional Vector Spaces")
@@ -574,13 +725,30 @@ class VectorAnalysisComponent(BaseComponent):
             with col2:
                 vector2 = st.selectbox("Y-axis vector:", [v for v in vector_names if v != vector1], key="2d_v2")
             
-            corpus_choice = st.radio("Analyze which corpus:", ["Target Corpus", "Core Corpus"], key="2d_corpus")
+            # Enhanced corpus selection with combined option
+            corpus_options = ["Target Corpus", "Core Corpus"]
+            if coordinator.target_embeddings is not None:
+                corpus_options.append("Combined Corpus")
+            
+            corpus_choice = st.radio("Analyze which corpus:", corpus_options, key="2d_corpus")
             use_target = corpus_choice == "Target Corpus"
+            use_combined = corpus_choice == "Combined Corpus"
+            
+            # Show info about combined corpus option
+            if use_combined:
+                st.info("🔄 Combined corpus analysis shows both core and target documents in the same space, revealing their spatial relationships.")
             
             if vector1 and vector2 and st.button("Create 2D Space"):
                 with st.spinner("Creating 2D vector space..."):
+                    # Ensure combined embeddings exist if needed
+                    if use_combined and coordinator.combined_embeddings is None:
+                        success, message = coordinator.create_combined_corpus_embeddings()
+                        if not success:
+                            st.error(f"Failed to create combined corpus: {message}")
+                            return
+                    
                     success, results, message = coordinator.create_2d_vector_space(
-                        vector1, vector2, use_target=use_target
+                        vector1, vector2, use_target=use_target, use_combined=use_combined
                     )
                 
                 if success:
@@ -588,12 +756,26 @@ class VectorAnalysisComponent(BaseComponent):
                     
                     # Display 2D space results
                     coordinates = results['coordinates']
-                    quadrant_stats = results['quadrant_statistics']
+                    quadrant_stats = results.get('quadrant_statistics', {})
                     
                     st.markdown("### 2D Vector Space")
                     st.write(f"**X-axis:** {vector1}")
                     st.write(f"**Y-axis:** {vector2}")
                     st.write(f"**Orthogonality Score:** {results['orthogonality_score']:.3f} (1.0 = perfectly orthogonal)")
+                    
+                    # Show combined corpus metrics if available
+                    if use_combined and 'corpus_comparison' in results:
+                        comp = results['corpus_comparison']
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            st.metric("Core Documents", comp['core_count'])
+                        with col2:
+                            st.metric("Target Documents", comp['target_count'])
+                        with col3:
+                            st.metric("Centroid Distance", f"{comp['centroid_distance']:.3f}")
+                        with col4:
+                            st.metric("Spread Ratio", f"{comp['relative_spread_ratio']:.3f}")
                     
                     # Create the 2D scatter plot
                     try:
@@ -604,29 +786,53 @@ class VectorAnalysisComponent(BaseComponent):
                         # Prepare data for plotting
                         plot_data = []
                         for coord in coordinates:
-                            plot_data.append({
+                            data_point = {
                                 'x': coord['x'],
                                 'y': coord['y'],
                                 'title': coord['document_metadata']['document_metadata']['title'][:50] + "...",
                                 'quadrant': coord['quadrant'],
                                 'filename': coord['document_metadata']['filename']
-                            })
+                            }
+                            
+                            # Add corpus type for combined view
+                            if use_combined:
+                                data_point['corpus_type'] = coord['document_metadata']['corpus_type']
+                            
+                            plot_data.append(data_point)
                         
                         df_plot = pd.DataFrame(plot_data)
                         
-                        # Create scatter plot with quadrant coloring
-                        fig = px.scatter(
-                            df_plot, 
-                            x='x', 
-                            y='y',
-                            color='quadrant',
-                            hover_data=['title', 'filename'],
-                            title=f"2D Vector Space: {vector1} vs {vector2}",
-                            labels={
-                                'x': f'{vector1} →',
-                                'y': f'{vector2} →'
-                            }
-                        )
+                        # Create scatter plot
+                        if use_combined:
+                            # Color by corpus type for combined view
+                            fig = px.scatter(
+                                df_plot, 
+                                x='x', 
+                                y='y',
+                                color='corpus_type',
+                                hover_data=['title', 'filename'],
+                                title=f"Combined 2D Vector Space: {vector1} vs {vector2}",
+                                labels={
+                                    'x': f'{vector1} →',
+                                    'y': f'{vector2} →',
+                                    'corpus_type': 'Corpus'
+                                },
+                                color_discrete_map={'core': 'red', 'target': 'blue'}
+                            )
+                        else:
+                            # Regular single corpus view
+                            fig = px.scatter(
+                                df_plot, 
+                                x='x', 
+                                y='y',
+                                color='quadrant',
+                                hover_data=['title', 'filename'],
+                                title=f"2D Vector Space: {vector1} vs {vector2}",
+                                labels={
+                                    'x': f'{vector1} →',
+                                    'y': f'{vector2} →'
+                                }
+                            )
                         
                         # Add quadrant lines
                         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
@@ -645,22 +851,23 @@ class VectorAnalysisComponent(BaseComponent):
                             )
                         )
                         
-                        # Add quadrant labels
-                        x_range = [df_plot['x'].min(), df_plot['x'].max()]
-                        y_range = [df_plot['y'].min(), df_plot['y'].max()]
-                        
-                        # Calculate label positions
-                        x_offset = (x_range[1] - x_range[0]) * 0.1
-                        y_offset = (y_range[1] - y_range[0]) * 0.1
-                        
-                        fig.add_annotation(x=x_range[1] - x_offset, y=y_range[1] - y_offset, 
-                                         text="Q1 (+,+)", showarrow=False, font=dict(size=12, color="gray"))
-                        fig.add_annotation(x=x_range[0] + x_offset, y=y_range[1] - y_offset, 
-                                         text="Q2 (-,+)", showarrow=False, font=dict(size=12, color="gray"))
-                        fig.add_annotation(x=x_range[0] + x_offset, y=y_range[0] + y_offset, 
-                                         text="Q3 (-,-)", showarrow=False, font=dict(size=12, color="gray"))
-                        fig.add_annotation(x=x_range[1] - x_offset, y=y_range[0] + y_offset, 
-                                         text="Q4 (+,-)", showarrow=False, font=dict(size=12, color="gray"))
+                        # Add quadrant labels (only for single corpus view)
+                        if not use_combined:
+                            x_range = [df_plot['x'].min(), df_plot['x'].max()]
+                            y_range = [df_plot['y'].min(), df_plot['y'].max()]
+                            
+                            # Calculate label positions
+                            x_offset = (x_range[1] - x_range[0]) * 0.1
+                            y_offset = (y_range[1] - y_range[0]) * 0.1
+                            
+                            fig.add_annotation(x=x_range[1] - x_offset, y=y_range[1] - y_offset, 
+                                             text="Q1 (+,+)", showarrow=False, font=dict(size=12, color="gray"))
+                            fig.add_annotation(x=x_range[0] + x_offset, y=y_range[1] - y_offset, 
+                                             text="Q2 (-,+)", showarrow=False, font=dict(size=12, color="gray"))
+                            fig.add_annotation(x=x_range[0] + x_offset, y=y_range[0] + y_offset, 
+                                             text="Q3 (-,-)", showarrow=False, font=dict(size=12, color="gray"))
+                            fig.add_annotation(x=x_range[1] - x_offset, y=y_range[0] + y_offset, 
+                                             text="Q4 (+,-)", showarrow=False, font=dict(size=12, color="gray"))
                         
                         st.plotly_chart(fig, use_container_width=True)
                         
@@ -672,27 +879,77 @@ class VectorAnalysisComponent(BaseComponent):
                             'Document': coord['document_metadata']['document_metadata']['title'][:50],
                             'X': f"{coord['x']:.3f}",
                             'Y': f"{coord['y']:.3f}",
-                            'Quadrant': coord['quadrant']
+                            'Quadrant': coord['quadrant'],
+                            'Corpus': coord['document_metadata'].get('corpus_type', 'N/A') if use_combined else 'N/A'
                         } for coord in coordinates[:20]])  # Show first 20
                         st.dataframe(coord_df)
                     
-                    # Quadrant statistics
-                    st.markdown("### Quadrant Distribution")
-                    quad_cols = st.columns(4)
+                    # Distribution analysis
+                    if use_combined:
+                        # Combined corpus quadrant analysis
+                        st.markdown("### Corpus Distribution Analysis")
+                        
+                        core_coords = results.get('core_coordinates', [])
+                        target_coords = results.get('target_coordinates', [])
+                        
+                        # Analyze quadrant distribution
+                        quadrant_analysis = {}
+                        for coords, corpus_type in [(core_coords, 'Core'), (target_coords, 'Target')]:
+                            for coord in coords:
+                                quad = coord['quadrant']
+                                if quad not in quadrant_analysis:
+                                    quadrant_analysis[quad] = {'core': 0, 'target': 0}
+                                quadrant_analysis[quad][corpus_type.lower()] += 1
+                        
+                        # Display quadrant comparison
+                        quad_cols = st.columns(4)
+                        for i, (quad, counts) in enumerate(quadrant_analysis.items()):
+                            with quad_cols[i % 4]:
+                                st.write(f"**{quad}**")
+                                st.write(f"Core: {counts.get('core', 0)}")
+                                st.write(f"Target: {counts.get('target', 0)}")
+                                
+                                # Add visual indicator for mixed quadrants
+                                if counts.get('core', 0) > 0 and counts.get('target', 0) > 0:
+                                    st.success("Mixed")
+                                elif counts.get('core', 0) > counts.get('target', 0):
+                                    st.info("Core-dominated")
+                                elif counts.get('target', 0) > 0:
+                                    st.warning("Target-dominated")
                     
-                    for i, (quad_name, quad_data) in enumerate(quadrant_stats.items()):
-                        with quad_cols[i % 4]:
-                            st.metric(quad_name, f"{quad_data['count']} docs", f"{quad_data['percentage']:.1f}%")
+                    else:
+                        # Regular quadrant statistics for single corpus
+                        st.markdown("### Quadrant Distribution")
+                        quad_cols = st.columns(4)
+                        
+                        for i, (quad_name, quad_data) in enumerate(quadrant_stats.items()):
+                            with quad_cols[i % 4]:
+                                st.metric(quad_name, f"{quad_data['count']} docs", f"{quad_data['percentage']:.1f}%")
                     
                     # Sample documents from each quadrant (collapsed by default)
                     with st.expander("Sample Documents by Quadrant", expanded=False):
-                        for quad_name, quad_data in quadrant_stats.items():
-                            if quad_data['documents']:
-                                st.markdown(f"**{quad_name} ({quad_data['count']} documents)**")
-                                for doc in quad_data['documents'][:3]:
-                                    title = doc['document_metadata']['document_metadata']['title']
-                                    st.write(f"• {title[:60]}... (x:{doc['x']:.2f}, y:{doc['y']:.2f})")
-                                st.markdown("---")
+                        if use_combined:
+                            # Show mixed quadrant analysis
+                            for quad, counts in quadrant_analysis.items():
+                                if counts.get('core', 0) > 0 or counts.get('target', 0) > 0:
+                                    st.markdown(f"**{quad} (Core: {counts.get('core', 0)}, Target: {counts.get('target', 0)})**")
+                                    
+                                    # Show sample from each corpus type in this quadrant
+                                    quad_docs = [coord for coord in coordinates if coord['quadrant'] == quad]
+                                    for doc in quad_docs[:3]:
+                                        corpus_type = doc['document_metadata']['corpus_type'].upper()
+                                        title = doc['document_metadata']['document_metadata']['title']
+                                        st.write(f"• [{corpus_type}] {title[:50]}... (x:{doc['x']:.2f}, y:{doc['y']:.2f})")
+                                    st.markdown("---")
+                        else:
+                            # Regular single corpus quadrant display
+                            for quad_name, quad_data in quadrant_stats.items():
+                                if quad_data['documents']:
+                                    st.markdown(f"**{quad_name} ({quad_data['count']} documents)**")
+                                    for doc in quad_data['documents'][:3]:
+                                        title = doc['document_metadata']['document_metadata']['title']
+                                        st.write(f"• {title[:60]}... (x:{doc['x']:.2f}, y:{doc['y']:.2f})")
+                                    st.markdown("---")
                 
                 else:
                     st.error(message)
@@ -707,13 +964,30 @@ class VectorAnalysisComponent(BaseComponent):
             with col3:
                 vector3 = st.selectbox("Z-axis vector:", [v for v in vector_names if v not in [vector1, vector2]], key="3d_v3")
             
-            corpus_choice = st.radio("Analyze which corpus:", ["Target Corpus", "Core Corpus"], key="3d_corpus")
-            use_target = corpus_choice == "Target Corpus"
+            # Enhanced corpus selection with combined option
+            corpus_options_3d = ["Target Corpus", "Core Corpus"]
+            if coordinator.target_embeddings is not None:
+                corpus_options_3d.append("Combined Corpus")
+            
+            corpus_choice_3d = st.radio("Analyze which corpus:", corpus_options_3d, key="3d_corpus")
+            use_target_3d = corpus_choice_3d == "Target Corpus"
+            use_combined_3d = corpus_choice_3d == "Combined Corpus"
+            
+            # Show info about combined corpus option
+            if use_combined_3d:
+                st.info("🔄 Combined corpus analysis shows both core and target documents in the same 3D space.")
             
             if vector1 and vector2 and vector3 and st.button("Create 3D Space"):
                 with st.spinner("Creating 3D vector space..."):
+                    # Ensure combined embeddings exist if needed
+                    if use_combined_3d and coordinator.combined_embeddings is None:
+                        success, message = coordinator.create_combined_corpus_embeddings()
+                        if not success:
+                            st.error(f"Failed to create combined corpus: {message}")
+                            return
+                    
                     success, results, message = coordinator.create_3d_vector_space(
-                        vector1, vector2, vector3, use_target=use_target
+                        vector1, vector2, vector3, use_target=use_target_3d, use_combined=use_combined_3d
                     )
                 
                 if success:
@@ -721,12 +995,26 @@ class VectorAnalysisComponent(BaseComponent):
                     
                     # Display 3D space results
                     coordinates = results['coordinates']
-                    octant_stats = results['octant_statistics']
+                    octant_stats = results.get('octant_statistics', {})
                     
                     st.markdown("### 3D Vector Space")
                     st.write(f"**X-axis:** {vector1}")
                     st.write(f"**Y-axis:** {vector2}")
                     st.write(f"**Z-axis:** {vector3}")
+                    
+                    # Show combined corpus metrics if available
+                    if use_combined_3d and 'corpus_comparison' in results:
+                        comp = results['corpus_comparison']
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            st.metric("Core Documents", comp['core_count'])
+                        with col2:
+                            st.metric("Target Documents", comp['target_count'])
+                        with col3:
+                            st.metric("Centroid Distance", f"{comp['centroid_distance']:.3f}")
+                        with col4:
+                            st.metric("Spread Ratio", f"{comp['relative_spread_ratio']:.3f}")
                     
                     # Create the 3D scatter plot
                     try:
@@ -737,32 +1025,58 @@ class VectorAnalysisComponent(BaseComponent):
                         # Prepare data for plotting
                         plot_data = []
                         for coord in coordinates:
-                            plot_data.append({
+                            data_point = {
                                 'x': coord['x'],
                                 'y': coord['y'],
                                 'z': coord['z'],
                                 'title': coord['document_metadata']['document_metadata']['title'][:50] + "...",
                                 'octant': coord['octant'],
                                 'filename': coord['document_metadata']['filename']
-                            })
+                            }
+                            
+                            # Add corpus type for combined view
+                            if use_combined_3d:
+                                data_point['corpus_type'] = coord['document_metadata']['corpus_type']
+                            
+                            plot_data.append(data_point)
                         
                         df_plot = pd.DataFrame(plot_data)
                         
                         # Create 3D scatter plot
-                        fig = px.scatter_3d(
-                            df_plot, 
-                            x='x', 
-                            y='y', 
-                            z='z',
-                            color='octant',
-                            hover_data=['title', 'filename'],
-                            title=f"3D Vector Space: {vector1} vs {vector2} vs {vector3}",
-                            labels={
-                                'x': f'{vector1} →',
-                                'y': f'{vector2} →',
-                                'z': f'{vector3} →'
-                            }
-                        )
+                        if use_combined_3d:
+                            # Color by corpus type for combined view
+                            fig = px.scatter_3d(
+                                df_plot, 
+                                x='x', 
+                                y='y', 
+                                z='z',
+                                color='corpus_type',
+                                hover_data=['title', 'filename'],
+                                title=f"Combined 3D Vector Space: {vector1} vs {vector2} vs {vector3}",
+                                labels={
+                                    'x': f'{vector1} →',
+                                    'y': f'{vector2} →',
+                                    'z': f'{vector3} →',
+                                    'corpus_type': 'Corpus'
+                                },
+                                color_discrete_map={'core': 'red', 'target': 'blue'}
+                            )
+                        else:
+                            # Regular single corpus view
+                            fig = px.scatter_3d(
+                                df_plot, 
+                                x='x', 
+                                y='y', 
+                                z='z',
+                                color='octant',
+                                hover_data=['title', 'filename'],
+                                title=f"3D Vector Space: {vector1} vs {vector2} vs {vector3}",
+                                labels={
+                                    'x': f'{vector1} →',
+                                    'y': f'{vector2} →',
+                                    'z': f'{vector3} →'
+                                }
+                            )
                         
                         # Add reference lines at origin
                         # X-axis line
@@ -818,49 +1132,99 @@ class VectorAnalysisComponent(BaseComponent):
                             'X': f"{coord['x']:.3f}",
                             'Y': f"{coord['y']:.3f}",
                             'Z': f"{coord['z']:.3f}",
-                            'Octant': coord['octant']
+                            'Octant': coord['octant'],
+                            'Corpus': coord['document_metadata'].get('corpus_type', 'N/A') if use_combined_3d else 'N/A'
                         } for coord in coordinates[:20]])  # Show first 20
                         st.dataframe(coord_df)
                     
-                    # Octant statistics
-                    st.markdown("### Octant Distribution")
-                    
-                    # Add octant explanation
-                    with st.expander("Understanding Octants", expanded=False):
-                        st.markdown("""
-                        **Octant Layout (3D Quadrants):**
-                        An octant divides 3D space into 8 regions using three axes.
+                    # Distribution analysis
+                    if use_combined_3d:
+                        # Combined corpus octant analysis
+                        st.markdown("### Corpus Distribution Analysis")
                         
-                        **What the signs mean:**
-                        - **First sign**: Position on X-axis (your first vector)
-                        - **Second sign**: Position on Y-axis (your second vector)  
-                        - **Third sign**: Position on Z-axis (your third vector)
-                        - **Positive (+)**: High on that vector dimension
-                        - **Negative (-)**: Low on that vector dimension
+                        core_coords = results.get('core_coordinates', [])
+                        target_coords = results.get('target_coordinates', [])
                         
-                        **Example interpretations:**
-                        - **O(+,+,+)**: High on all three vectors
-                        - **O(-,+,-)**: Low on X-axis, High on Y-axis, Low on Z-axis
-                        - **O(-,-,-)**: Low on all three vectors
+                        # Analyze octant distribution
+                        octant_analysis = {}
+                        for coords, corpus_type in [(core_coords, 'Core'), (target_coords, 'Target')]:
+                            for coord in coords:
+                                oct = coord['octant']
+                                if oct not in octant_analysis:
+                                    octant_analysis[oct] = {'core': 0, 'target': 0}
+                                octant_analysis[oct][corpus_type.lower()] += 1
                         
-                        Each octant represents a unique combination of high/low positions across your three chosen dimensions.
-                        """)
+                        # Display octant comparison
+                        oct_cols = st.columns(4)
+                        for i, (oct, counts) in enumerate(octant_analysis.items()):
+                            with oct_cols[i % 4]:
+                                st.write(f"**{oct}**")
+                                st.write(f"Core: {counts.get('core', 0)}")
+                                st.write(f"Target: {counts.get('target', 0)}")
+                                
+                                # Add visual indicator for mixed octants
+                                if counts.get('core', 0) > 0 and counts.get('target', 0) > 0:
+                                    st.success("Mixed")
+                                elif counts.get('core', 0) > counts.get('target', 0):
+                                    st.info("Core-dominated")
+                                elif counts.get('target', 0) > 0:
+                                    st.warning("Target-dominated")
                     
-                    oct_cols = st.columns(4)
-                    
-                    for i, (oct_name, oct_data) in enumerate(octant_stats.items()):
-                        with oct_cols[i % 4]:
-                            st.metric(oct_name, f"{oct_data['count']} docs", f"{oct_data['percentage']:.1f}%")
+                    else:
+                        # Regular octant statistics for single corpus
+                        st.markdown("### Octant Distribution")
+                        
+                        # Add octant explanation
+                        with st.expander("Understanding Octants", expanded=False):
+                            st.markdown("""
+                            **Octant Layout (3D Quadrants):**
+                            An octant divides 3D space into 8 regions using three axes.
+                            
+                            **What the signs mean:**
+                            - **First sign**: Position on X-axis (your first vector)
+                            - **Second sign**: Position on Y-axis (your second vector)  
+                            - **Third sign**: Position on Z-axis (your third vector)
+                            - **Positive (+)**: High on that vector dimension
+                            - **Negative (-)**: Low on that vector dimension
+                            
+                            **Example interpretations:**
+                            - **O(+,+,+)**: High on all three vectors
+                            - **O(-,+,-)**: Low on X-axis, High on Y-axis, Low on Z-axis
+                            - **O(-,-,-)**: Low on all three vectors
+                            
+                            Each octant represents a unique combination of high/low positions across your three chosen dimensions.
+                            """)
+                        
+                        oct_cols = st.columns(4)
+                        
+                        for i, (oct_name, oct_data) in enumerate(octant_stats.items()):
+                            with oct_cols[i % 4]:
+                                st.metric(oct_name, f"{oct_data['count']} docs", f"{oct_data['percentage']:.1f}%")
                     
                     # Sample documents from each octant (collapsed by default)
                     with st.expander("Sample Documents by Octant", expanded=False):
-                        for oct_name, oct_data in octant_stats.items():
-                            if oct_data['documents']:
-                                st.markdown(f"**{oct_name} ({oct_data['count']} documents)**")
-                                for doc in oct_data['documents'][:2]:
-                                    title = doc['document_metadata']['document_metadata']['title']
-                                    st.write(f"• {title[:50]}... (x:{doc['x']:.2f}, y:{doc['y']:.2f}, z:{doc['z']:.2f})")
-                                st.markdown("---")
+                        if use_combined_3d:
+                            # Show mixed octant analysis
+                            for oct, counts in octant_analysis.items():
+                                if counts.get('core', 0) > 0 or counts.get('target', 0) > 0:
+                                    st.markdown(f"**{oct} (Core: {counts.get('core', 0)}, Target: {counts.get('target', 0)})**")
+                                    
+                                    # Show sample from each corpus type in this octant
+                                    oct_docs = [coord for coord in coordinates if coord['octant'] == oct]
+                                    for doc in oct_docs[:2]:
+                                        corpus_type = doc['document_metadata']['corpus_type'].upper()
+                                        title = doc['document_metadata']['document_metadata']['title']
+                                        st.write(f"• [{corpus_type}] {title[:40]}... (x:{doc['x']:.2f}, y:{doc['y']:.2f}, z:{doc['z']:.2f})")
+                                    st.markdown("---")
+                        else:
+                            # Regular single corpus octant display
+                            for oct_name, oct_data in octant_stats.items():
+                                if oct_data['documents']:
+                                    st.markdown(f"**{oct_name} ({oct_data['count']} documents)**")
+                                    for doc in oct_data['documents'][:2]:
+                                        title = doc['document_metadata']['document_metadata']['title']
+                                        st.write(f"• {title[:50]}... (x:{doc['x']:.2f}, y:{doc['y']:.2f}, z:{doc['z']:.2f})")
+                                    st.markdown("---")
                 
                 else:
                     st.error(message)
